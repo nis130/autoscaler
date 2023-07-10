@@ -123,26 +123,26 @@ type InTreeToCSITranslator interface {
 // also considered along with the pod's other scheduling requirements.
 //
 // This integrates into the existing scheduler workflow as follows:
-// 1. The scheduler takes a Pod off the scheduler queue and processes it serially:
-//    a. Invokes all pre-filter plugins for the pod. GetPodVolumes() is invoked
-//    here, pod volume information will be saved in current scheduling cycle state for later use.
-//    b. Invokes all filter plugins, parallelized across nodes.  FindPodVolumes() is invoked here.
-//    c. Invokes all score plugins.  Future/TBD
-//    d. Selects the best node for the Pod.
-//    e. Invokes all reserve plugins. AssumePodVolumes() is invoked here.
-//       i.  If PVC binding is required, cache in-memory only:
-//           * For manual binding: update PV objects for prebinding to the corresponding PVCs.
-//           * For dynamic provisioning: update PVC object with a selected node from c)
-//           * For the pod, which PVCs and PVs need API updates.
-//       ii. Afterwards, the main scheduler caches the Pod->Node binding in the scheduler's pod cache,
-//           This is handled in the scheduler and not here.
-//    f. Asynchronously bind volumes and pod in a separate goroutine
-//        i.  BindPodVolumes() is called first in PreBind phase. It makes all the necessary API updates and waits for
-//            PV controller to fully bind and provision the PVCs. If binding fails, the Pod is sent
-//            back through the scheduler.
-//        ii. After BindPodVolumes() is complete, then the scheduler does the final Pod->Node binding.
-// 2. Once all the assume operations are done in e), the scheduler processes the next Pod in the scheduler queue
-//    while the actual binding operation occurs in the background.
+//  1. The scheduler takes a Pod off the scheduler queue and processes it serially:
+//     a. Invokes all pre-filter plugins for the pod. GetPodVolumes() is invoked
+//     here, pod volume information will be saved in current scheduling cycle state for later use.
+//     b. Invokes all filter plugins, parallelized across nodes.  FindPodVolumes() is invoked here.
+//     c. Invokes all score plugins.  Future/TBD
+//     d. Selects the best node for the Pod.
+//     e. Invokes all reserve plugins. AssumePodVolumes() is invoked here.
+//     i.  If PVC binding is required, cache in-memory only:
+//     * For manual binding: update PV objects for prebinding to the corresponding PVCs.
+//     * For dynamic provisioning: update PVC object with a selected node from c)
+//     * For the pod, which PVCs and PVs need API updates.
+//     ii. Afterwards, the main scheduler caches the Pod->Node binding in the scheduler's pod cache,
+//     This is handled in the scheduler and not here.
+//     f. Asynchronously bind volumes and pod in a separate goroutine
+//     i.  BindPodVolumes() is called first in PreBind phase. It makes all the necessary API updates and waits for
+//     PV controller to fully bind and provision the PVCs. If binding fails, the Pod is sent
+//     back through the scheduler.
+//     ii. After BindPodVolumes() is complete, then the scheduler does the final Pod->Node binding.
+//  2. Once all the assume operations are done in e), the scheduler processes the next Pod in the scheduler queue
+//     while the actual binding operation occurs in the background.
 type SchedulerVolumeBinder interface {
 	// GetPodVolumes returns a pod's PVCs separated into bound, unbound with delayed binding (including provisioning)
 	// and unbound with immediate binding (including prebound)
@@ -500,15 +500,14 @@ func (b *volumeBinder) bindAPIUpdate(pod *v1.Pod, bindings []*BindingInfo, claim
 	// Do the actual prebinding. Let the PV controller take care of the rest
 	// There is no API rollback if the actual binding fails
 	for _, binding = range bindings {
-		klog.V(5).InfoS("bindAPIUpdate: binding PV to PVC", "pod", klog.KObj(pod), "PV", klog.KObj(binding.pv), "PVC", klog.KObj(binding.pvc))
 		// TODO: does it hurt if we make an api call and nothing needs to be updated?
-		klog.V(2).InfoS("Claim bound to volume", "PVC", klog.KObj(binding.pvc), "PV", klog.KObj(binding.pv))
+		klog.V(5).InfoS("Updating PersistentVolume: binding to claim", "pod", klog.KObj(pod), "PV", klog.KObj(binding.pv), "PVC", klog.KObj(binding.pvc))
 		newPV, err := b.kubeClient.CoreV1().PersistentVolumes().Update(context.TODO(), binding.pv, metav1.UpdateOptions{})
 		if err != nil {
-			klog.V(4).InfoS("Updating PersistentVolume: binding to claim failed", "PV", klog.KObj(binding.pv), "PVC", klog.KObj(binding.pvc), "err", err)
+			klog.V(4).InfoS("Updating PersistentVolume: binding to claim failed", "pod", klog.KObj(pod), "PV", klog.KObj(binding.pv), "PVC", klog.KObj(binding.pvc), "err", err)
 			return err
 		}
-		klog.V(4).InfoS("Updating PersistentVolume: bound to claim", "PV", klog.KObj(binding.pv), "PVC", klog.KObj(binding.pvc))
+		klog.V(2).InfoS("Updated PersistentVolume with claim. Waiting for binding to complete", "pod", klog.KObj(pod), "PV", klog.KObj(binding.pv), "PVC", klog.KObj(binding.pvc))
 		// Save updated object from apiserver for later checking.
 		binding.pv = newPV
 		lastProcessedBinding++
@@ -669,7 +668,7 @@ func (b *volumeBinder) checkBindings(pod *v1.Pod, bindings []*BindingInfo, claim
 	}
 
 	// All pvs and pvcs that we operated on are bound
-	klog.V(4).InfoS("All PVCs for pod are bound", "pod", klog.KObj(pod))
+	klog.V(2).InfoS("All PVCs for pod are bound", "pod", klog.KObj(pod))
 	return true, nil
 }
 
